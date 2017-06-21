@@ -210,10 +210,12 @@ package android.taobao.atlas.framework;
 
 import android.os.*;
 import android.taobao.atlas.bundleInfo.AtlasBundleInfoManager;
+import android.taobao.atlas.bundleInfo.BundleListing;
 import android.taobao.atlas.runtime.LowDiskException;
 import android.taobao.atlas.runtime.RuntimeVariables;
 import android.taobao.atlas.util.ApkUtils;
 import android.taobao.atlas.util.FileUtils;
+import android.taobao.atlas.util.log.impl.AtlasMonitor;
 import android.taobao.atlas.versionInfo.BaselineInfoManager;
 import android.util.Log;
 import android.util.Pair;
@@ -224,7 +226,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.zip.ZipEntry;
 
@@ -541,8 +545,8 @@ public class BundleInstaller implements Callable{
         if(bundle==null){
             bundle = Framework.restoreFromExistedBundle(bundleName);
         }
-        if(bundle==null && BaselineInfoManager.instance().isChanged(bundleName)){
-            throw new RuntimeException("restore existed bundle failed");
+        if(bundle==null && (BaselineInfoManager.instance().isDexPatched(bundleName) || BaselineInfoManager.instance().isUpdated(bundleName))){
+            Log.e("BundleInstaller","restore existed bundle failed : "+bundleName);
         }
         return bundle;
     }
@@ -555,6 +559,9 @@ public class BundleInstaller implements Callable{
                 if (FileUtils.getUsableSpace(Environment.getDataDirectory()) >= 5) {
                     if (mBundleSourceInputStream != null && mBundleSourceInputStream.length>x && mBundleSourceInputStream[x]!=null) {
                         if ((bundle = getInstalledBundle(mLocation[x])) == null) {
+                            if((BaselineInfoManager.instance().isDexPatched(mLocation[x]) || BaselineInfoManager.instance().isUpdated(mLocation[x]))){
+                                continue;
+                            }
                             bundle = Framework.installNewBundle(mLocation[x], mBundleSourceInputStream[x]);
                         }
                         if (bundle != null) {
@@ -562,6 +569,9 @@ public class BundleInstaller implements Callable{
                         }
                     } else if (mBundleSourceFile != null && mBundleSourceFile.length>x && mBundleSourceFile[x]!=null) {
                         if ((bundle = getInstalledBundle(mLocation[x])) == null) {
+                            if((BaselineInfoManager.instance().isDexPatched(mLocation[x]) || BaselineInfoManager.instance().isUpdated(mLocation[x]))){
+                                continue;
+                            }
                             bundle = Framework.installNewBundle(mLocation[x], mBundleSourceFile[x]);
                         }
                         if (bundle != null) {
@@ -569,6 +579,9 @@ public class BundleInstaller implements Callable{
                         }
                     } else {
                         if ((bundle = getInstalledBundle(mLocation[x])) == null && AtlasBundleInfoManager.instance().isInternalBundle(mLocation[x])) {
+                            if((BaselineInfoManager.instance().isDexPatched(mLocation[x]) || BaselineInfoManager.instance().isUpdated(mLocation[x]))){
+                                continue;
+                            }
                             bundle = installBundleFromApk(mLocation[x]);
                             if (bundle != null) {
                                 ((BundleImpl) bundle).optDexFile();
@@ -585,6 +598,9 @@ public class BundleInstaller implements Callable{
                 Log.e("BundleInstaller",mLocation[x]+"-->"+bundlesForInstall.toString());
                 for (String bundleName : bundlesForInstall) {
                     if ((bundle = getInstalledBundle(bundleName)) == null) {
+                        if((BaselineInfoManager.instance().isDexPatched(bundleName) || BaselineInfoManager.instance().isUpdated(bundleName))){
+                            continue;
+                        }
                         if (FileUtils.getUsableSpace(Environment.getDataDirectory()) >= 5) {
                             //has enough space
                             if(AtlasBundleInfoManager.instance().isInternalBundle(bundleName)) {
@@ -614,6 +630,11 @@ public class BundleInstaller implements Callable{
 
     /**
      * 获取bundle源文件地址
+     *
+     * bundle finding order by follwing paths:
+     * 1) ${getApplicationInfo().dataDir}/lib/
+     * 2) ${getApplicationInfo().nativeLibraryDir}
+     * 3) apk's "lib/armeabi" path.
      * @param location
      */
     private void findBundleSource(String location) throws IOException{
@@ -623,8 +644,12 @@ public class BundleInstaller implements Callable{
         String bundleFileName = String.format("lib%s.so",location.replace(".","_"));
         String bundlePath = String.format("%s/lib/%s", dataDir,bundleFileName);
         File bundleFile = new File(bundlePath);
-        if(bundleFile.exists() && AtlasBundleInfoManager.instance().isInternalBundle(location)){
+        if(!bundleFile.exists()){
+            bundleFile = new File(RuntimeVariables.androidApplication.getApplicationInfo().nativeLibraryDir,bundleFileName);
+        }
+        if(isBundleFileTimeStampMatched(location,bundleFile)){
             mTmpBundleSourceFile = bundleFile;
+            Log.e("BundleInstaller","find valid bundle : "+bundleFile.getAbsolutePath());
         }else{
             if(ApkUtils.getApk()!=null){
                 ZipEntry entry = ApkUtils.getApk().getEntry("lib/armeabi/" + bundleFileName);
@@ -632,6 +657,27 @@ public class BundleInstaller implements Callable{
                     mTmpBundleSourceInputStream = ApkUtils.getApk().getInputStream(entry);
                 }
             }
+        }
+    }
+
+    private boolean isBundleFileTimeStampMatched(String location,File file){
+        if(!file.exists() || !AtlasBundleInfoManager.instance().isInternalBundle(location)){
+            return false;
+        }
+        if(file.lastModified() == getTimeStampInApk()){
+            return true;
+        }
+        return false;
+    }
+
+    private static long timeStampInApk = -11021836;
+    private synchronized long getTimeStampInApk(){
+        try {
+            if (timeStampInApk == -11021836) {
+                timeStampInApk = ApkUtils.getApk().getEntry("classes.dex").getTime();
+            }
+        }finally {
+            return timeStampInApk>0 ? timeStampInApk : 0;
         }
     }
 
@@ -643,7 +689,11 @@ public class BundleInstaller implements Callable{
         }else if(mTmpBundleSourceInputStream!=null){
             bundle = Framework.installNewBundle(bundleName,mTmpBundleSourceInputStream);
         }else{
-            throw new IOException("can not find bundle source file");
+            IOException e = new IOException("can not find bundle source file");
+            Map<String, Object> detail = new HashMap<>();
+            detail.put("installBundleFromApk",bundleName);
+            AtlasMonitor.getInstance().report(AtlasMonitor.CONTAINER_BUNDLE_SOURCE_MISMATCH, detail, e);
+            throw e;
         }
         return bundle;
     }

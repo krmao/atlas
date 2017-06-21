@@ -1,8 +1,7 @@
 # Atlas
 
- atlas-core[![Download](https://api.bintray.com/packages/alibabaatlas/maven/atlas/images/download.svg)](https://bintray.com/alibabaatlas/maven/atlas/_latestVersion)
- atlas-update[![Download](https://api.bintray.com/packages/alibabaatlas/maven/atlasupdate/images/download.svg)](https://bintray.com/alibabaatlas/maven/atlasupdate/_latestVersion)
- atlas-gradle-plugin[![Download](https://api.bintray.com/packages/alibabaatlas/maven/atlasplugin/images/download.svg)](https://bintray.com/alibabaatlas/maven/atlasplugin/_latestVersion)
+[![license](http://img.shields.io/badge/license-Apache2.0-brightgreen.svg?style=flat)](https://github.com/alibaba/atlas/blob/master/LICENSE)
+[![Release Version](https://img.shields.io/badge/release-5.0.7-yellow.svg)](https://github.com/alibaba/atlas/releases) 
 
 > A powerful Android Dynamic Component Framework.
 
@@ -35,6 +34,8 @@ You can see there were three main library in this project ([atlas-core](./atlas-
 
 * [Demo](./atlas-demo)
 * Doc: [English](), [中文](./atlas-docs)
+* DingTalk im group: Scan the follow QR code or Search group 11727755 using DingTalk(钉钉) app.
+![dingtalk.png](assets/dingtalk.png) 
 
 
 ## Support

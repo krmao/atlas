@@ -209,10 +209,11 @@
 package android.taobao.atlas.runtime;
 
 
-import android.app.PreVerifier;
 import android.content.res.AssetManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.content.res.XmlResourceParser;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.taobao.atlas.hack.AndroidHack;
 import android.taobao.atlas.hack.AtlasHacks;
@@ -239,6 +240,7 @@ public class DelegateResources extends Resources {
 
     private static String sKernalPathPath = null;
     private static String sAssetsPatchDir = null;
+    private Resources origin;
 
 
     /**
@@ -250,9 +252,50 @@ public class DelegateResources extends Resources {
      */
     public DelegateResources(AssetManager assets, Resources res) {
         super(assets, res.getDisplayMetrics(), res.getConfiguration());
-        if(Boolean.FALSE.booleanValue()){
-            String.valueOf(PreVerifier.class);
+        origin = res;
+    }
+
+    @Override
+    public XmlResourceParser getLayout(int id) throws NotFoundException {
+        XmlResourceParser result = null;
+        NotFoundException exception = null;
+        try{
+            result = super.getLayout(id);
+        }catch(NotFoundException e){
+            exception = e;
+            if(origin!=null) {
+                try {
+                    result = origin.getLayout(id);
+                } catch (Throwable e2) {
+                }
+            }
+
         }
+        if(result==null && exception!=null){
+            throw exception;
+        }
+        return result;
+    }
+
+    public Drawable getDrawable(int id, Theme theme) throws NotFoundException {
+        Drawable result = null;
+        NotFoundException exception = null;
+        try{
+            result = super.getDrawable(id,theme);
+        }catch(NotFoundException e){
+            exception = e;
+            if(origin!=null) {
+                try {
+                    result = origin.getDrawable(id,theme);
+                } catch (Throwable e2) {
+                }
+            }
+
+        }
+        if(result==null && exception!=null){
+            throw exception;
+        }
+        return result;
     }
 
     public static void reset(){
@@ -260,14 +303,26 @@ public class DelegateResources extends Resources {
         sAssetsPatchDir = null;
     }
 
-    public static void addBundleResources(String assetPath)  throws Exception{
-        updateResources(RuntimeVariables.delegateResources, assetPath, BUNDLE_RES);
+    public static void addBundleResources(String assetPath,String debugPath)  throws Exception{
+        synchronized (DelegateResources.class) {
+            if(debugPath!=null && !findResByAssetIndexDescending()){
+                updateResources(RuntimeVariables.delegateResources, debugPath, BUNDLE_RES);
+
+            }
+            updateResources(RuntimeVariables.delegateResources, assetPath, BUNDLE_RES);
+            if(debugPath!=null && findResByAssetIndexDescending()){
+                updateResources(RuntimeVariables.delegateResources, debugPath, BUNDLE_RES);
+
+            }
+        }
     }
 
     public static void addApkpatchResources(String assetPath) throws Exception{
         AtlasHacks.defineAndVerify();
         sKernalPathPath = assetPath;
-        updateResources(RuntimeVariables.delegateResources, assetPath, APK_RES);
+        synchronized (DelegateResources.class) {
+            updateResources(RuntimeVariables.delegateResources, assetPath, APK_RES);
+        }
     }
 
     public static String getCurrentAssetpathStr(AssetManager manager){
@@ -292,7 +347,7 @@ public class DelegateResources extends Resources {
     }
 
 
-    private synchronized static void updateResources(Resources res,String assetPath,int assertType) throws Exception{
+    private static void updateResources(Resources res,String assetPath,int assertType) throws Exception{
         if(sAssetManagerProcessor==null){
             sAssetManagerProcessor = new AssetManagerProcessor();
         }
@@ -328,6 +383,18 @@ public class DelegateResources extends Resources {
         }
     }
 
+    /**
+     * 是否已assetpatch索引降序的方式查找资源
+     * @return
+     */
+    private static boolean findResByAssetIndexDescending(){
+        if(Build.VERSION.SDK_INT>20){
+            return false;
+        }else {
+            return true;
+        }
+    }
+
     private static class AssetManagerProcessor {
 
         private static HashMap<String,Boolean> sDefaultAssetPathList  ;
@@ -357,12 +424,9 @@ public class DelegateResources extends Resources {
         public AssetManager updateAssetManager(AssetManager manager,String newAssetPath,int assetType)throws Exception{
             AssetManager targetManager = null;
             if(assetType == BUNDLE_RES){
-                if(supportExpandAssetManager()){
-                    targetManager = updateAssetManagerWithAppend(manager, newAssetPath,assetType);
-                }else{
-                    targetManager = createNewAssetManager(manager,newAssetPath,true,assetType);
-                }
-                updateAssetPathList(newAssetPath,true);
+                boolean append = findResByAssetIndexDescending();
+                targetManager = createNewAssetManager(manager,newAssetPath,append,assetType);
+                updateAssetPathList(newAssetPath,append);
             }else{
                 File newAssetsDir = new File(new File(newAssetPath).getParent(),"newAssets");
                 if(newAssetsDir.exists() && new File(newAssetsDir,"assets").exists()){
@@ -496,19 +560,6 @@ public class DelegateResources extends Resources {
             return newAssetManager;
         }
 
-
-        /**
-         * 是否已assetpatch索引降序的方式查找资源
-         * @return
-         */
-        private boolean findResByAssetIndexDescending(){
-            if(Build.VERSION.SDK_INT>20){
-                return false;
-            }else {
-                return true;
-            }
-        }
-
         private boolean hasCreatedAssetsManager = false;
         private synchronized boolean supportExpandAssetManager(){
             if(Build.VERSION.SDK_INT>=24){
@@ -532,12 +583,10 @@ public class DelegateResources extends Resources {
 
             if(sKernalPathPath!=null) {
                 if(sFailedAsssetPath.contains(sKernalPathPath)){
-                    AtlasMonitor.getInstance().trace(AtlasMonitor.KERNAL_RESOLVE_FAIL,"com.taobao.maindex",AtlasMonitor.ADD_RESOURCES_FAIL_MSG,"maindex arsc inject fail");
                     throw new RuntimeException("maindex arsc inject fail");
                 }
                 if(sAssetsPatchDir!=null) {
                     if(sFailedAsssetPath.contains(sAssetsPatchDir)){
-                        AtlasMonitor.getInstance().trace(AtlasMonitor.KERNAL_RESOLVE_FAIL,"com.taobao.maindex",AtlasMonitor.ADD_RESOURCES_FAIL_MSG,"maindex assets inject fail");
                         throw new RuntimeException("maindex assets inject fail");
                     }
                 }
@@ -547,6 +596,7 @@ public class DelegateResources extends Resources {
 
         private boolean appendAssetPath(AssetManager asset,String path) throws Exception{
             int cookie = 0;
+            boolean result = false;
             try{
                 if ((cookie = Integer.parseInt(AtlasHacks.AssetManager_addAssetPath.invoke(asset, path).toString())) == 0){
                     // if failed try three times
@@ -557,14 +607,21 @@ public class DelegateResources extends Resources {
                         }
                     }
                 }
-            }catch(NumberFormatException e){
-                return false;
+                if(cookie==0){
+                    sFailedAsssetPath.add(path);
+                } else {
+                    result = true;
+                }
+            }catch(NumberFormatException e){}
+
+            if (!result) {
+//                AtlasMonitor.getInstance().trace(AtlasMonitor.CONTAINER_APPEND_ASSETPATH_FAIL,
+//                        false, "0", "","");
+                Map<String, Object> detail = new HashMap<>();
+                detail.put("appendAssetPath", path);
+                AtlasMonitor.getInstance().report(AtlasMonitor.CONTAINER_APPEND_ASSETPATH_FAIL, detail, new RuntimeException());
             }
-            if(cookie==0){
-                sFailedAsssetPath.add(path);
-                return false;
-            }
-            return true;
+            return result;
         }
 
         public static ArrayList<String> getAssetPath(AssetManager manager){
